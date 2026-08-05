@@ -1,0 +1,223 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: GitHub Native Security
+
+'on':
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  dependency_review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Dependency Review
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' || github.event_name == 'merge_group' }}
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
+        with:
+          fail-on-severity: high
+
+      - name: Dependency Review Not Applicable
+        if: ${{ github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.event_name != 'merge_group' }}
+        run: |
+          {
+            echo "## Dependency Review"
+            echo
+            echo "Dependency Review only runs for pull-request style events, so it is intentionally not executed for this ${GITHUB_EVENT_NAME} run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  code_scanning:
+    name: Detect Code Scanning Availability
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: read
+    outputs:
+      enabled: ${{ steps.detect.outputs.enabled }}
+      note: ${{ steps.detect.outputs.note }}
+    steps:
+      - name: Check Availability
+        id: detect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          response_file="$RUNNER_TEMP/code-scanning-check.json"
+          status_code="$({
+            curl -sS \
+              -o "$response_file" \
+              -w '%{http_code}' \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/code-scanning/alerts?per_page=1"
+          } || echo 000)"
+
+          case "$status_code" in
+            200|204)
+              echo 'enabled=true' >> "$GITHUB_OUTPUT"
+              echo 'note=GitHub code scanning APIs are available for this repository.' >> "$GITHUB_OUTPUT"
+              ;;
+            403|404)
+              echo 'enabled=false' >> "$GITHUB_OUTPUT"
+              echo 'note=GitHub code scanning is unavailable for this repository or token. CodeQL and SARIF uploads remain skipped until GHAS/code scanning is enabled.' >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo 'enabled=false' >> "$GITHUB_OUTPUT"
+              echo "note=Code scanning availability probe returned HTTP ${status_code}." >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Write Summary
+        run: |
+          {
+            echo "## GitHub Native Security"
+            echo
+            echo "- Code scanning available: ${{ steps.detect.outputs.enabled }}"
+            echo "- Note: ${{ steps.detect.outputs.note }}"
+            echo "- Supported repository-managed CodeQL targets: python, actions"
+            echo "- Developer-only target excluded from the committed CodeQL workflow: client/ios"
+            echo
+            echo "If GitHub default setup is enabled in the repository settings, disable it and rely on this committed workflow. Default setup currently mis-detects the developer-only iOS host project and spawns failing Ruby/Swift jobs that do not represent the supported release surface."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    needs:
+      - code_scanning
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            runner: ubuntu-latest
+          - language: actions
+            runner: ubuntu-latest
+    steps:
+      - name: CodeQL Not Available
+        if: ${{ needs.code_scanning.outputs.enabled != 'true' }}
+        run: |
+          {
+            echo "## CodeQL"
+            echo
+            echo "Code scanning is not enabled for this repository, so CodeQL analysis and SARIF/database upload are being skipped cleanly for this run."
+            echo
+            echo "${{ needs.code_scanning.outputs.note }}"
+            echo
+            echo "Supported repository-managed scan targets: python and GitHub Actions."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout
+        if: ${{ needs.code_scanning.outputs.enabled == 'true' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        if: ${{ needs.code_scanning.outputs.enabled == 'true' && matrix.language == 'python' }}
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Initialize CodeQL
+        if: ${{ needs.code_scanning.outputs.enabled == 'true' }}
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Analyze
+        if: ${{ needs.code_scanning.outputs.enabled == 'true' }}
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e
+        with:
+          category: /language:${{ matrix.language }}
+          upload: true
+
+      - name: Upload CodeQL Artifact
+        if: ${{ always() && needs.code_scanning.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: codeql-${{ matrix.language }}-sarif
+          path: ${{ runner.workspace }}/results/*.sarif
+          if-no-files-found: warn
+
+      - name: Write CodeQL Summary
+        if: ${{ always() && needs.code_scanning.outputs.enabled == 'true' }}
+        run: |
+          {
+            echo "## CodeQL (${{ matrix.language }})"
+            echo
+            echo "- Build mode: none"
+            echo "- Repository-managed target: ${{ matrix.language }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  scorecard:
+    name: OpenSSF Scorecard
+    needs:
+      - code_scanning
+    if: ${{ github.event_name != 'pull_request' && github.event_name != 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      id-token: write
+      issues: read
+      pull-requests: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Scorecard
+        continue-on-error: true
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a
+        with:
+          repo_token: ${{ secrets.SCORECARD_TOKEN || github.token }}
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: false
+
+      - name: Upload Scorecard Artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: scorecard-results
+          path: scorecard-results.sarif
+          if-no-files-found: warn
+
+      - name: Upload Scorecard SARIF
+        if: ${{ always() && needs.code_scanning.outputs.enabled == 'true' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e
+        with:
+          sarif_file: scorecard-results.sarif

@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+[versioning]
+bootstrap_commit = "83ce935115e146a954791d2161768176478a29bc"
+base_version = "0.1.65"
+base_build = 65
+changelog_start_marker = "<!-- opsatlas-versioning:start -->"
+changelog_end_marker = "<!-- opsatlas-versioning:end -->"

@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Default owner
+* @bora-yarkin
+
+# Protect repository policy and automation
+/.github/ @bora-yarkin
+/LICENSE @bora-yarkin
+/.github/CODE_OF_CONDUCT.md @bora-yarkin
+/.github/CONTRIBUTING.md @bora-yarkin
+/CHANGELOG.md @bora-yarkin

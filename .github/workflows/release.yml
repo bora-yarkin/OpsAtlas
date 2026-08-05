@@ -1,0 +1,113 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Publish Release
+
+'on':
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  publish:
+    name: Tag And Publish GitHub Release
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Release Commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Verify Version Metadata
+        run: python tools/versioning.py verify
+
+      - name: Build Release Bundle
+        run: make release
+
+      - name: Collect Release Metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/versioning.py release-metadata > "$RUNNER_TEMP/release-metadata.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run_root = Path(os.environ["RUNNER_TEMP"])
+          payload = json.loads((run_root / "release-metadata.json").read_text(encoding="utf-8"))
+          notes_path = run_root / "release-notes.md"
+          notes_path.write_text(payload["notes"], encoding="utf-8")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
+              print(f"version={payload['version']}", file=fh)
+              print(f"tag={payload['tag']}", file=fh)
+              print(f"title={payload['title']}", file=fh)
+              print(f"released_on={payload['released_on']}", file=fh)
+              print(f"notes_path={notes_path}", file=fh)
+              print("asset_path=dist/release.zip", file=fh)
+              print(f"asset_name=opsatlas-{payload['tag']}.zip", file=fh)
+          PY
+
+      - name: Upload Release Bundle Artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-bundle-${{ steps.metadata.outputs.tag }}
+          path: dist/release.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.metadata.outputs.title }}
+          RELEASE_NOTES_PATH: ${{ steps.metadata.outputs.notes_path }}
+          RELEASE_ASSET_PATH: ${{ steps.metadata.outputs.asset_path }}
+          RELEASE_ASSET_NAME: ${{ steps.metadata.outputs.asset_name }}
+          RELEASE_TARGET_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          asset_spec="${RELEASE_ASSET_PATH}#${RELEASE_ASSET_NAME}"
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE" --notes-file "$RELEASE_NOTES_PATH"
+            gh release upload "$RELEASE_TAG" "$asset_spec" --clobber
+          else
+            gh release create \
+              "$RELEASE_TAG" \
+              "$asset_spec" \
+              --target "$RELEASE_TARGET_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$RELEASE_NOTES_PATH" \
+              --latest
+          fi
+
+      - name: Write Release Summary
+        run: |
+          {
+            echo "## Published Release"
+            echo
+            echo "- Version: \`${{ steps.metadata.outputs.version }}\`"
+            echo "- Tag: \`${{ steps.metadata.outputs.tag }}\`"
+            echo "- Released on: ${{ steps.metadata.outputs.released_on }}"
+            echo "- Asset: \`${{ steps.metadata.outputs.asset_name }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

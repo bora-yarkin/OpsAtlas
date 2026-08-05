@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: opsatlas_client
+description: Flutter web client for OpsAtlas, a self-hosted operations workspace for procedures, incidents, and follow-up work.
+publish_to: none
+version: 0.10.0+86
+homepage: https://github.com/bora-yarkin/OpsAtlas
+repository: https://github.com/bora-yarkin/OpsAtlas.git
+issue_tracker: https://github.com/bora-yarkin/OpsAtlas/issues
+
+environment:
+  sdk: ">=3.11.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_riverpod: ">=3.3.2"
+  go_router: ^17.3.0
+  dio: ^5.10.0
+  flutter_html: ">=3.0.0"
+  html_editor_enhanced: ">=2.7.1"
+  markdown: ">=7.3.1"
+  shared_preferences: ">=2.5.5"
+  file_picker: ">=10.3.10"
+  flutter_dropzone: ">=4.2.1"
+  flutter_svg: ">=2.3.0"
+  qr_flutter: ">=4.1.0"
+  google_fonts: ^8.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ">=6.0.0"
+
+flutter:
+  uses-material-design: true

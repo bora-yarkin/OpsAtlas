@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+[build-system]
+requires = ["setuptools>=82.0.1", "wheel>=0.46.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OpsAtlas-backend"
+version = "0.10.0"
+description = "FastAPI backend for OpsAtlas, a self-hosted operations workspace for procedures, incidents, and follow-up work."
+readme = "README.md"
+authors = [
+  { name = "Bora Yarkın" },
+]
+license = "GPL-3.0-only"
+requires-python = ">=3.11"
+keywords = ["ops", "operations", "incident-management", "knowledge-base", "fastapi"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: System Administrators",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+  "fastapi>=0.135.3",
+  "uvicorn[standard]>=0.44.0",
+  "pydantic>=2.13.0",
+  "pydantic-settings>=2.14.2",
+  "email-validator>=2.3.0",
+  "sqlalchemy>=2.0.49",
+  "psycopg[binary]>=3.3.3",
+  "PyJWT>=2.13.0",
+  "cryptography>=48.0.1",
+  "argon2-cffi>=25.1.0",
+  "passlib>=1.7.4",
+  "python-multipart>=0.0.31",
+  "bleach>=6.4.0",
+  "Pillow>=11.2.1",
+  "starlette>=1.3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.1",
+  "pytest>=9.0.3",
+  "pytest-asyncio>=1.3.0",
+  "pytest-cov>=7.0.0",
+  "ruff>=0.15.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/bora-yarkin/OpsAtlas"
+Repository = "https://github.com/bora-yarkin/OpsAtlas.git"
+Issues = "https://github.com/bora-yarkin/OpsAtlas/issues"
+Changelog = "https://github.com/bora-yarkin/OpsAtlas/blob/main/CHANGELOG.md"
+
+[tool.uv]
+dev-dependencies = [
+  "httpx>=0.28.1",
+  "pytest>=9.0.3",
+  "pytest-asyncio>=1.3.0",
+  "pytest-cov>=7.0.0",
+  "ruff>=0.15.10",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+filterwarnings = [
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead\\.",
+  "ignore:Accessing argon2.__version__ is deprecated and will be removed in a future release\\.:DeprecationWarning",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

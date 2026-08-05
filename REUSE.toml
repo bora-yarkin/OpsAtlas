@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+version = 1
+
+[[annotations]]
+path = [
+  ".github/ISSUE_TEMPLATE/bug_report.md",
+  ".github/ISSUE_TEMPLATE/feature_request.md",
+  "LICENSE",
+  "backend/pyrightconfig.json",
+  "backend/uv.lock",
+  "client/pubspec.lock",
+  "client/web/favicon.png",
+  "client/web/manifest.json",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Bora Yarkın"
+SPDX-License-Identifier = "GPL-3.0-only"
+
+[[annotations]]
+path = [
+  ".dockerignore",
+  ".env.docker.example",
+  ".vscode/launch.json",
+  "backend/.coverage",
+  "backend/scripts/container_entrypoint.py",
+  "client/.gitignore",
+  "client/ios/**",
+  "client/test/ui_smoke_test.dart",
+  "client/test/widget_test.dart",
+  "compose.yaml",
+  "docker/backend/Dockerfile",
+  "docker/release/compose.seeddb.yaml",
+  "docker/web/Dockerfile",
+  "docker/web/nginx.conf",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Bora Yarkın"
+SPDX-License-Identifier = "GPL-3.0-only"

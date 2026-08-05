@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/bora-yarkin/OpsAtlas/blob/main/.github/SECURITY.md
+    about: Please report vulnerabilities privately and follow the security policy.

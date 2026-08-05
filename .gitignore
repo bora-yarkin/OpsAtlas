@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Local downloaded artifacts
+Artifacts/
+artifacts/
+combined-ci-summary.log
+audit.md
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+venv/
+.venv/
+dist/
+build/
+test-results/
+*.egg-info/
+*.sqlite3
+backend/instance/
+
+# Java/Gradle
+backup-service/.gradle/
+backup-service/build/
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Flutter/Dart
+# Generic Flutter workspace artifacts
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.pub-cache/
+.pub/
+/coverage/
+app.*.symbols
+app.*.map.json
+
+# Local Flutter app (client/) artifacts
+client/.dart_tool/
+client/.metadata
+client/build/
+client/.flutter-plugins
+client/.flutter-plugins-dependencies
+client/.packages
+client/.pub-cache/
+client/ios/Pods/
+client/ios/.symlinks/
+*.jks
+*.keystore
+client/opsatlas_client.iml
+
+# Misc editor/system files seen in nested app templates
+*.swp
+*.swo
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.log
+.atom/
+.cursor/
+.direnv/
+.build/
+.buildlog/
+.fleet/
+.history
+.nova/
+.svn/
+.swiftpm/
+.zed/
+migrate_working_dir/

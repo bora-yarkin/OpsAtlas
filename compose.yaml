@@ -1,0 +1,204 @@
+name: opsatlas
+
+x-backend-env: &backend-env
+  APP_ENV: "${APP_ENV:-container}"
+  APP_NAME: "${APP_NAME:-OpsAtlas}"
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+  PUBLIC_API_BASE_URL: "${OPSATLAS_PUBLIC_API_BASE_URL:-}"
+  PUBLIC_WEB_ORIGIN: "${OPSATLAS_PUBLIC_WEB_ORIGIN:-}"
+  DB_ECHO: "${DB_ECHO:-false}"
+  JWT_ISSUER: "${JWT_ISSUER:-OpsAtlas}"
+  JWT_AUDIENCE: "${JWT_AUDIENCE:-OpsAtlas-client}"
+  ACCESS_TOKEN_MINUTES: "${ACCESS_TOKEN_MINUTES:-240}"
+  REFRESH_TOKEN_DAYS: "${REFRESH_TOKEN_DAYS:-14}"
+  CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
+  TRUSTED_HOSTS: "${TRUSTED_HOSTS:-localhost,127.0.0.1}"
+  AUTO_CREATE_TABLES: "${AUTO_CREATE_TABLES:-false}"
+  AI_ENABLED: "${AI_ENABLED:-true}"
+  AI_PROVIDER: "${AI_PROVIDER:-heuristic}"
+  AI_RATE_LIMIT_PER_MINUTE: "${AI_RATE_LIMIT_PER_MINUTE:-30}"
+  AI_MAX_INPUT_CHARS: "${AI_MAX_INPUT_CHARS:-12000}"
+  AI_SUMMARY_CHAR_LIMIT: "${AI_SUMMARY_CHAR_LIMIT:-400}"
+  MEDIA_STORAGE_DIR: "/srv/opsatlas-instance/media_storage"
+  MEDIA_MAX_UPLOAD_MB: "${MEDIA_MAX_UPLOAD_MB:-25}"
+  MEDIA_TOKEN_TTL_SECONDS: "${MEDIA_TOKEN_TTL_SECONDS:-3600}"
+  BACKGROUND_WORKERS_ENABLED: "${BACKGROUND_WORKERS_ENABLED:-true}"
+  MAINTENANCE_INTERVAL_SECONDS: "${MAINTENANCE_INTERVAL_SECONDS:-300}"
+  HSTS_MAX_AGE_SECONDS: "${HSTS_MAX_AGE_SECONDS:-63072000}"
+  AUTH_LOGIN_MAX_ATTEMPTS: "${AUTH_LOGIN_MAX_ATTEMPTS:-5}"
+  AUTH_LOGIN_LOCKOUT_BASE_SECONDS: "${AUTH_LOGIN_LOCKOUT_BASE_SECONDS:-60}"
+  AUTH_LOGIN_LOCKOUT_MAX_SECONDS: "${AUTH_LOGIN_LOCKOUT_MAX_SECONDS:-1800}"
+  AUTH_IP_RATE_LIMIT_PER_MINUTE: "${AUTH_IP_RATE_LIMIT_PER_MINUTE:-60}"
+  AUTH_REFRESH_RATE_LIMIT_PER_MINUTE: "${AUTH_REFRESH_RATE_LIMIT_PER_MINUTE:-30}"
+  PASSWORD_MIN_LENGTH: "${PASSWORD_MIN_LENGTH:-10}"
+  PASSWORD_REQUIRE_UPPER: "${PASSWORD_REQUIRE_UPPER:-true}"
+  PASSWORD_REQUIRE_LOWER: "${PASSWORD_REQUIRE_LOWER:-true}"
+  PASSWORD_REQUIRE_DIGIT: "${PASSWORD_REQUIRE_DIGIT:-true}"
+  PASSWORD_REQUIRE_SYMBOL: "${PASSWORD_REQUIRE_SYMBOL:-true}"
+  PASSWORD_COMPROMISED_CHECK_ENABLED: "${PASSWORD_COMPROMISED_CHECK_ENABLED:-true}"
+  PASSWORD_ENFORCE_IN_DEV: "${PASSWORD_ENFORCE_IN_DEV:-false}"
+  MFA_ENABLED: "${MFA_ENABLED:-true}"
+  MFA_ENFORCE_IN_DEV: "${MFA_ENFORCE_IN_DEV:-false}"
+  MFA_TOTP_WINDOW: "${MFA_TOTP_WINDOW:-1}"
+  MFA_TOTP_ISSUER: "${MFA_TOTP_ISSUER:-OpsAtlas}"
+  AUTH_COOKIE_ACCESS_NAME: "${AUTH_COOKIE_ACCESS_NAME:-opsatlas_access}"
+  AUTH_COOKIE_REFRESH_NAME: "${AUTH_COOKIE_REFRESH_NAME:-opsatlas_refresh}"
+  AUTH_COOKIE_SESSION_NAME: "${AUTH_COOKIE_SESSION_NAME:-opsatlas_session}"
+  AUTH_COOKIE_PATH: "${AUTH_COOKIE_PATH:-/}"
+  AUTH_COOKIE_DOMAIN: "${AUTH_COOKIE_DOMAIN:-}"
+  AUTH_COOKIE_SAMESITE: "${AUTH_COOKIE_SAMESITE:-lax}"
+  AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-false}"
+  AUTH_COOKIE_SECURE_IN_DEV: "${AUTH_COOKIE_SECURE_IN_DEV:-false}"
+  MEDIA_ALLOWED_EXTENSIONS: "${MEDIA_ALLOWED_EXTENSIONS:-png,jpg,jpeg,gif,webp,pdf,txt,md,csv,json,zip,docx,xlsx,pptx,mp4,webm,mov,m4v,mp3,wav,ogg,m4a}"
+  MEDIA_ALLOWED_MIME_TYPES: "${MEDIA_ALLOWED_MIME_TYPES:-image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,application/zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav,audio/ogg,audio/x-m4a}"
+  MEDIA_BLOCKED_EXTENSIONS: "${MEDIA_BLOCKED_EXTENSIONS:-html,htm,svg,svgz,js,mjs,xhtml}"
+  MEDIA_BLOCKED_MIME_TYPES: "${MEDIA_BLOCKED_MIME_TYPES:-text/html,application/xhtml+xml,image/svg+xml,application/javascript,text/javascript}"
+  MEDIA_QUARANTINE_DIR: "/srv/opsatlas-instance/media_storage/quarantine"
+  MEDIA_MALWARE_SCAN_ENABLED: "${MEDIA_MALWARE_SCAN_ENABLED:-false}"
+  MEDIA_MALWARE_SCAN_COMMAND: "${MEDIA_MALWARE_SCAN_COMMAND:-}"
+  OPSATLAS_RUNTIME_ENV_FILE: "/bootstrap/generated.env"
+  WAIT_FOR_DB_TIMEOUT_SECONDS: "${WAIT_FOR_DB_TIMEOUT_SECONDS:-90}"
+  WAIT_FOR_DB_INTERVAL_SECONDS: "${WAIT_FOR_DB_INTERVAL_SECONDS:-2}"
+
+services:
+  env-bootstrap:
+    image: python:3.14
+    restart: "no"
+    working_dir: /release-root
+    environment:
+      OPSATLAS_ENV_FILE: "${OPSATLAS_ENV_FILE:-}"
+      OPSATLAS_BOOTSTRAP_DIR: "/bootstrap"
+      OPSATLAS_RELEASE_ROOT: "/release-root"
+    volumes:
+      - .:/release-root
+      - opsatlas_bootstrap_data:/bootstrap
+    command: ["python", "docker/release/bootstrap_env.py"]
+
+  db:
+    image: postgres:latest
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      OPSATLAS_DB_NAME: "${OPSATLAS_DB_NAME:-opsatlas}"
+      OPSATLAS_DB_USER: "${OPSATLAS_DB_USER:-opsatlas}"
+    depends_on:
+      env-bootstrap:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        . /bootstrap/generated.env
+        export POSTGRES_DB="$${OPSATLAS_DB_NAME:-opsatlas}"
+        export POSTGRES_USER="$${OPSATLAS_DB_USER:-opsatlas}"
+        export POSTGRES_PASSWORD="$${OPSATLAS_DB_PASSWORD:?missing OPSATLAS_DB_PASSWORD}"
+        exec docker-entrypoint.sh postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$OPSATLAS_DB_USER -d $$OPSATLAS_DB_NAME"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - opsatlas_postgres_data:/var/lib/postgresql/data
+      - opsatlas_bootstrap_data:/bootstrap:ro
+
+  filestorage:
+    image: debian:latest
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /srv/opsatlas-instance/media_storage/quarantine /srv/opsatlas-instance/backups
+        chmod -R 755 /srv/opsatlas-instance
+        tail -f /dev/null
+    volumes:
+      - opsatlas_instance_data:/srv/opsatlas-instance
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+      pull: true
+    restart: unless-stopped
+    depends_on:
+      env-bootstrap:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      filestorage:
+        condition: service_started
+    environment: *backend-env
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - exec python scripts/container_entrypoint.py "$$@"
+      - --
+    volumes:
+      - opsatlas_instance_data:/srv/opsatlas-instance
+      - opsatlas_bootstrap_data:/bootstrap:ro
+    command: ["api"]
+    ports:
+      - "${OPSATLAS_API_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  seeddb:
+    profiles: ["seeddb"]
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+      pull: true
+    restart: "no"
+    depends_on:
+      env-bootstrap:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      filestorage:
+        condition: service_started
+    environment: *backend-env
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - exec python scripts/container_entrypoint.py "$$@"
+      - --
+    volumes:
+      - opsatlas_instance_data:/srv/opsatlas-instance
+      - opsatlas_bootstrap_data:/bootstrap:ro
+    command: ["seeddb"]
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+      pull: true
+      args:
+        API_BASE_URL: "${OPSATLAS_PUBLIC_API_BASE_URL:-http://localhost:8000}"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${OPSATLAS_WEB_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  opsatlas_postgres_data:
+  opsatlas_instance_data:
+  opsatlas_bootstrap_data:

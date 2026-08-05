@@ -1,0 +1,559 @@
+# SPDX-FileCopyrightText: 2026 Bora Yarkın
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Product CI
+
+'on':
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  versioning:
+    name: Versioning And Generated Release Notes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Verify Version Metadata
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ci-artifacts/versioning
+          python tools/versioning.py verify 2>&1 | tee ci-artifacts/versioning/verify.log
+          verify_rc=${PIPESTATUS[0]}
+          echo "VERSIONING_VERIFY_RC=$verify_rc" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Upload Versioning Artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: versioning-artifacts
+          path: ci-artifacts/versioning
+          if-no-files-found: warn
+
+      - name: Finalize Versioning Job
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Versioning"
+            echo
+            echo "- Verify exit code: ${VERSIONING_VERIFY_RC:-1}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "${VERSIONING_VERIFY_RC:-1}" -eq 0
+
+  backend:
+    name: Backend Lint And Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+
+      - name: Run Backend Checks
+        shell: bash
+        run: |
+          set +e
+          mkdir -p test-results
+
+          uv sync --frozen 2>&1 | tee test-results/backend-uv-sync.log
+          sync_rc=${PIPESTATUS[0]}
+
+          uv run --frozen ruff check app scripts tests 2>&1 | tee test-results/backend-ruff.log
+          ruff_rc=${PIPESTATUS[0]}
+
+          uv run --frozen pytest \
+            tests \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --junitxml=test-results/backend-pytest.xml \
+            2>&1 | tee test-results/backend-pytest.log
+          pytest_rc=${PIPESTATUS[0]}
+
+          overall_rc=0
+          for rc in "$sync_rc" "$ruff_rc" "$pytest_rc"; do
+            if [ "$rc" -ne 0 ]; then
+              overall_rc=1
+            fi
+          done
+
+          {
+            echo "BACKEND_SYNC_RC=$sync_rc"
+            echo "BACKEND_RUFF_RC=$ruff_rc"
+            echo "BACKEND_PYTEST_RC=$pytest_rc"
+            echo "BACKEND_JOB_RC=$overall_rc"
+          } >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Upload Backend Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: backend-test-artifacts
+          path: |
+            backend/coverage.xml
+            backend/test-results/backend-uv-sync.log
+            backend/test-results/backend-ruff.log
+            backend/test-results/backend-pytest.log
+            backend/test-results/backend-pytest.xml
+          if-no-files-found: warn
+
+      - name: Finalize Backend Job
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Backend"
+            echo
+            echo "- uv sync exit code: ${BACKEND_SYNC_RC:-1}"
+            echo "- Ruff exit code: ${BACKEND_RUFF_RC:-1}"
+            echo "- Pytest exit code: ${BACKEND_PYTEST_RC:-1}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "${BACKEND_JOB_RC:-1}" -eq 0
+
+  client:
+    name: Frontend Analyze And Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Run Frontend Checks
+        shell: bash
+        run: |
+          set +e
+          mkdir -p test-results coverage
+
+          flutter pub get 2>&1 | tee test-results/flutter-pub-get.log
+          pub_get_rc=${PIPESTATUS[0]}
+
+          flutter analyze 2>&1 | tee test-results/flutter-analyze.log
+          analyze_rc=${PIPESTATUS[0]}
+
+          flutter test --coverage --reporter expanded test 2>&1 | tee test-results/flutter-test.log
+          test_rc=${PIPESTATUS[0]}
+
+          overall_rc=0
+          for rc in "$pub_get_rc" "$analyze_rc" "$test_rc"; do
+            if [ "$rc" -ne 0 ]; then
+              overall_rc=1
+            fi
+          done
+
+          {
+            echo "CLIENT_PUB_GET_RC=$pub_get_rc"
+            echo "CLIENT_ANALYZE_RC=$analyze_rc"
+            echo "CLIENT_TEST_RC=$test_rc"
+            echo "CLIENT_JOB_RC=$overall_rc"
+          } >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Upload Frontend Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: frontend-test-artifacts
+          path: |
+            client/coverage/lcov.info
+            client/test-results/flutter-pub-get.log
+            client/test-results/flutter-analyze.log
+            client/test-results/flutter-test.log
+          if-no-files-found: warn
+
+      - name: Finalize Frontend Job
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Frontend"
+            echo
+            echo "- Flutter pub get exit code: ${CLIENT_PUB_GET_RC:-1}"
+            echo "- Flutter analyze exit code: ${CLIENT_ANALYZE_RC:-1}"
+            echo "- Flutter test exit code: ${CLIENT_TEST_RC:-1}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "${CLIENT_JOB_RC:-1}" -eq 0
+
+  security:
+    name: Security And Supply Chain Checks
+    runs-on: ubuntu-latest
+    env:
+      IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork || false }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+
+      - name: Run Security Checks
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ci-artifacts/security
+
+          uv sync --project backend --frozen 2>&1 | tee ci-artifacts/security/backend-uv-sync.log
+          backend_sync_rc=${PIPESTATUS[0]}
+
+          curl -fsSL -o "$RUNNER_TEMP/osv-scanner" \
+            https://github.com/google/osv-scanner/releases/download/v2.3.5/osv-scanner_linux_amd64 \
+            2>&1 | tee ci-artifacts/security/osv-download.log
+          osv_download_rc=${PIPESTATUS[0]}
+
+          chmod +x "$RUNNER_TEMP/osv-scanner" 2>&1 | tee -a ci-artifacts/security/osv-download.log
+          chmod_rc=${PIPESTATUS[0]}
+
+          "$RUNNER_TEMP/osv-scanner" --version 2>&1 | tee ci-artifacts/security/osv-version.log
+          osv_version_rc=${PIPESTATUS[0]}
+
+          uv run --project backend --frozen --with pip-audit==2.9.0 pip-audit 2>&1 | tee ci-artifacts/security/pip-audit.log
+          pip_audit_rc=${PIPESTATUS[0]}
+
+          uv run --project backend --frozen --with bandit==1.8.6 bandit -r backend/app -q -lll 2>&1 | tee ci-artifacts/security/bandit.log
+          bandit_rc=${PIPESTATUS[0]}
+
+          if [ "${IS_FORK_PR}" != "true" ]; then
+            if [ -f .github/osv-scanner.toml ]; then
+              "$RUNNER_TEMP/osv-scanner" scan --config .github/osv-scanner.toml --recursive . 2>&1 | tee ci-artifacts/security/osv-scan.log
+            else
+              "$RUNNER_TEMP/osv-scanner" scan --recursive . 2>&1 | tee ci-artifacts/security/osv-scan.log
+            fi
+            osv_scan_rc=${PIPESTATUS[0]}
+          else
+            printf 'OSV scan skipped for fork pull request.\n' | tee ci-artifacts/security/osv-scan.log
+            osv_scan_rc=0
+          fi
+
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f dir --verbose --redact --exit-code 1 /repo 2>&1 | tee ci-artifacts/security/gitleaks.log
+          gitleaks_rc=${PIPESTATUS[0]}
+
+          uv run --project backend --frozen --with reuse==6.2.0 reuse lint 2>&1 | tee ci-artifacts/security/reuse.log
+          reuse_rc=${PIPESTATUS[0]}
+
+          overall_rc=0
+          for rc in \
+            "$backend_sync_rc" \
+            "$osv_download_rc" \
+            "$chmod_rc" \
+            "$osv_version_rc" \
+            "$pip_audit_rc" \
+            "$bandit_rc" \
+            "$osv_scan_rc" \
+            "$gitleaks_rc" \
+            "$reuse_rc"; do
+            if [ "$rc" -ne 0 ]; then
+              overall_rc=1
+            fi
+          done
+
+          {
+            echo "SECURITY_BACKEND_SYNC_RC=$backend_sync_rc"
+            echo "SECURITY_OSV_DOWNLOAD_RC=$osv_download_rc"
+            echo "SECURITY_OSV_CHMOD_RC=$chmod_rc"
+            echo "SECURITY_OSV_VERSION_RC=$osv_version_rc"
+            echo "SECURITY_PIP_AUDIT_RC=$pip_audit_rc"
+            echo "SECURITY_BANDIT_RC=$bandit_rc"
+            echo "SECURITY_OSV_SCAN_RC=$osv_scan_rc"
+            echo "SECURITY_GITLEAKS_RC=$gitleaks_rc"
+            echo "SECURITY_REUSE_RC=$reuse_rc"
+            echo "SECURITY_JOB_RC=$overall_rc"
+          } >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Upload Security Artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: security-artifacts
+          path: ci-artifacts/security
+          if-no-files-found: warn
+
+      - name: Finalize Security Job
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Security"
+            echo
+            echo "- Backend uv sync exit code: ${SECURITY_BACKEND_SYNC_RC:-1}"
+            echo "- OSV download exit code: ${SECURITY_OSV_DOWNLOAD_RC:-1}"
+            echo "- OSV version exit code: ${SECURITY_OSV_VERSION_RC:-1}"
+            echo "- Pip Audit exit code: ${SECURITY_PIP_AUDIT_RC:-1}"
+            echo "- Bandit exit code: ${SECURITY_BANDIT_RC:-1}"
+            echo "- OSV scan exit code: ${SECURITY_OSV_SCAN_RC:-1}"
+            echo "- Gitleaks exit code: ${SECURITY_GITLEAKS_RC:-1}"
+            echo "- REUSE exit code: ${SECURITY_REUSE_RC:-1}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "${SECURITY_JOB_RC:-1}" -eq 0
+
+  dast:
+    name: DAST Smoke Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+
+      - name: Run DAST Smoke Script
+        shell: bash
+        run: |
+          set +e
+          mkdir -p ci-artifacts/dast
+          uv sync --project backend --frozen --no-dev
+          uv run --project backend --frozen --no-dev python backend/scripts/run_dast_ci.py 2>&1 | tee ci-artifacts/dast/dast.log
+          dast_rc=${PIPESTATUS[0]}
+          echo "DAST_JOB_RC=$dast_rc" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Upload DAST Artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dast-artifacts
+          path: ci-artifacts/dast
+          if-no-files-found: warn
+
+      - name: Finalize DAST Job
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## DAST"
+            echo
+            echo "- DAST exit code: ${DAST_JOB_RC:-1}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "${DAST_JOB_RC:-1}" -eq 0
+
+  report:
+    name: Combined CI Report
+    if: always()
+    needs:
+      - versioning
+      - backend
+      - client
+      - security
+      - dast
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          path: ci-report
+
+      - name: Build Combined Summary
+        shell: bash
+        env:
+          VERSIONING_RESULT: ${{ needs.versioning.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          CLIENT_RESULT: ${{ needs.client.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+          DAST_RESULT: ${{ needs.dast.result }}
+        run: |
+          mkdir -p ci-report
+          cat > ci-report/summary.md <<EOF
+          # Product CI Summary
+
+          - Versioning: ${VERSIONING_RESULT}
+          - Backend: ${BACKEND_RESULT}
+          - Frontend: ${CLIENT_RESULT}
+          - Security: ${SECURITY_RESULT}
+          - DAST: ${DAST_RESULT}
+          EOF
+          cat ci-report/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Combined Report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: product-ci-report
+          path: ci-report
+          if-no-files-found: warn
+
+      - name: Fail Workflow If Any Job Failed
+        shell: bash
+        env:
+          VERSIONING_RESULT: ${{ needs.versioning.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          CLIENT_RESULT: ${{ needs.client.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+          DAST_RESULT: ${{ needs.dast.result }}
+        run: |
+          overall_rc=0
+          for result in \
+            "$VERSIONING_RESULT" \
+            "$BACKEND_RESULT" \
+            "$CLIENT_RESULT" \
+            "$SECURITY_RESULT" \
+            "$DAST_RESULT"; do
+            if [ "$result" != "success" ]; then
+              overall_rc=1
+            fi
+          done
+          exit "$overall_rc"
+
+  release:
+    name: Publish GitHub Release
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs:
+      - report
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Release Commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Verify Version Metadata
+        run: python tools/versioning.py verify
+
+      - name: Build Release Bundle
+        run: make release
+
+      - name: Collect Release Metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/versioning.py release-metadata > "$RUNNER_TEMP/release-metadata.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run_root = Path(os.environ["RUNNER_TEMP"])
+          payload = json.loads((run_root / "release-metadata.json").read_text(encoding="utf-8"))
+          notes_path = run_root / "release-notes.md"
+          notes_path.write_text(payload["notes"], encoding="utf-8")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as fh:
+              print(f"version={payload['version']}", file=fh)
+              print(f"tag={payload['tag']}", file=fh)
+              print(f"title={payload['title']}", file=fh)
+              print(f"released_on={payload['released_on']}", file=fh)
+              print(f"notes_path={notes_path}", file=fh)
+              print("asset_path=dist/release.zip", file=fh)
+              print(f"asset_name=opsatlas-{payload['tag']}.zip", file=fh)
+          PY
+
+      - name: Upload Release Bundle Artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-bundle-${{ steps.metadata.outputs.tag }}
+          path: dist/release.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.metadata.outputs.title }}
+          RELEASE_NOTES_PATH: ${{ steps.metadata.outputs.notes_path }}
+          RELEASE_ASSET_PATH: ${{ steps.metadata.outputs.asset_path }}
+          RELEASE_ASSET_NAME: ${{ steps.metadata.outputs.asset_name }}
+          RELEASE_TARGET_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          asset_spec="${RELEASE_ASSET_PATH}#${RELEASE_ASSET_NAME}"
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE" --notes-file "$RELEASE_NOTES_PATH"
+            gh release upload "$RELEASE_TAG" "$asset_spec" --clobber
+          else
+            gh release create \
+              "$RELEASE_TAG" \
+              "$asset_spec" \
+              --target "$RELEASE_TARGET_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$RELEASE_NOTES_PATH" \
+              --latest
+          fi
+
+      - name: Write Release Summary
+        run: |
+          {
+            echo "## Published Release"
+            echo
+            echo "- Version: \`${{ steps.metadata.outputs.version }}\`"
+            echo "- Tag: \`${{ steps.metadata.outputs.tag }}\`"
+            echo "- Released on: ${{ steps.metadata.outputs.released_on }}"
+            echo "- Asset: \`${{ steps.metadata.outputs.asset_name }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
